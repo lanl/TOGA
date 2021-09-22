@@ -1,20 +1,20 @@
 # OpenMC input deck for testbed reactor model
 
 ################################################
-# 					Imports
+#                     Imports
 ################################################
 
 import openmc
 import matplotlib.pyplot as plt
 import openmc.checkvalue as cv
-from mgxs import *
+
 
 ################################################
-# 				Define Materials
+#                 Define Materials
 ################################################
 
 fuel_mat = openmc.Material(material_id=1, name='fuel_mat')
-fuel_mat.temperature = 900.
+fuel_mat.temperature = 295.
 fuel_mat.add_nuclide('U235',0.2)
 fuel_mat.add_nuclide('U238',0.8)
 fuel_mat.add_nuclide('H1',1.0)
@@ -39,7 +39,7 @@ pipe_mat.add_element('Mo',1.0)
 pipe_mat.set_density('g/cm3',8.0)
 
 monolith_mat = openmc.Material(material_id=5, name='monolith_mat')
-monolith_mat.add_nuclide('C0',1.0)
+monolith_mat.add_nuclide('C12',1.0)
 monolith_mat.set_density('g/cm3',1.75)
 # monolith_mat.add_s_alpha_beta('c_Graphite')
 
@@ -54,10 +54,10 @@ materials = openmc.Materials([fuel_mat,mod_mat,vapor_mat,pipe_mat,monolith_mat,r
 materials.export_to_xml()
 
 ################################################
-# 				Define Geometry
+#                 Define Geometry
 ################################################
 
-################# Surfaces ################# 
+################# Surfaces #################
 
 # ZCylinders to model pins
 pipe_inner = openmc.ZCylinder(surface_id=100, x0=0, y0=0, r=0.6)
@@ -65,7 +65,7 @@ pipe_outer = openmc.ZCylinder(surface_id=101, x0=0, y0=0, r=0.7)
 mod_r      = openmc.ZCylinder(surface_id=102, x0=0, y0=0, r=0.75)
 fuel_r     = openmc.ZCylinder(surface_id=103, x0=0, y0=0, r=0.8)
 
-# top & bottom of the assembly 
+# top & bottom of the assembly
 assembly_z0 = openmc.ZPlane(surface_id=300, z0=-1, boundary_type='reflective')
 assembly_z1 = openmc.ZPlane(surface_id=301, z0=1, boundary_type='reflective')
 
@@ -76,7 +76,7 @@ assembly = openmc.model.hexagonal_prism(edge_length=16.166, orientation='y')
 reflector = openmc.model.hexagonal_prism(edge_length=27.713, orientation='y',
     boundary_type='vacuum')
 
-################# Cells ################# 
+################# Cells #################
 
 pipe_cell_inner = openmc.Cell(name= 'pipe_cell_inner', cell_id=100)
 pipe_cell_wall = openmc.Cell(name= 'pipe_cell_wall', cell_id=101)
@@ -86,12 +86,12 @@ mod_cell_outer = openmc.Cell(name= 'mod_cell_outer', cell_id=104)
 fuel_cell_inner = openmc.Cell(name= 'fuel_cell_inner', cell_id=105)
 fuel_cell_outer = openmc.Cell(name= 'fuel_cell_outer', cell_id=106)
 
-monolith_cell = openmc.Cell(name= '', cell_id=201)
-assembly_cell = openmc.Cell(name= '', cell_id=301)
+monolith_cell = openmc.Cell(name= 'monolith_cell', cell_id=201)
+assembly_cell = openmc.Cell(name= 'assembly_cell', cell_id=301)
 
-reflect_cell = openmc.Cell(name= '', cell_id=401)
+reflect_cell = openmc.Cell(name= 'reflect_cell', cell_id=401)
 
-#################  Regions ################# 
+#################  Regions #################
 
 pipe_cell_inner.region = -pipe_inner & -assembly_z1 & +assembly_z0
 pipe_cell_wall.region = -pipe_outer & + pipe_inner & -assembly_z1 & +assembly_z0
@@ -117,7 +117,7 @@ monolith_cell.fill = monolith_mat
 
 reflect_cell.fill = reflector_mat
 
-################# Universes ################# 
+################# Universes #################
 
 u_pipe = openmc.Universe(universe_id=100)
 u_pipe.add_cells(
@@ -139,7 +139,7 @@ u_reflect = openmc.Universe(universe_id=300,
 
 u_root = openmc.Universe(universe_id=400)
 
-################# Lattice ################# 
+################# Lattice #################
 
 lattice = openmc.HexLattice()
 lattice.center = (0.0,0.0)
@@ -220,10 +220,10 @@ geom.export_to_xml()
 ########################
 
 # xy plot
-plt.figure(figsize=(12,12))
-u_root.plot(origin=(0,0,0),width=(50,60),color_by='material',pixels=[400,400])
-plt.savefig('Plot')
-plt.clf()
+# plt.figure(figsize=(12,12))
+# u_root.plot(origin=(0,0,0),width=(50,60),color_by='material',pixels=[400,400])
+# plt.savefig('Plot')
+# plt.clf()
 
 #######################
 # Run Settings
@@ -235,11 +235,9 @@ settings = openmc.Settings()
 settings.output = {'tallies':False}
 settings.seed = 1
 settings.batches = 200
-settings.inactive = 100
+settings.inactive = 50
 settings.particles = 1000
 settings.source = openmc.source.Source(space=uniform_dist)
-settings.trigger_active = True
-settings.trigger_max_batches = settings.batches * 4
 settings.temperature = {'multipole': True, 'method': 'interpolation', 'range': [290,2501]}
 settings.export_to_xml()
 
@@ -247,10 +245,21 @@ settings.export_to_xml()
 # MGXS Settings
 ######################
 
+# ################# Mesh #################
+# Create a mesh over the geometry.
+# If domain = 'mesh'
+# the mgxs will be generated on this mesh.
+# If quantify_error = True,
+# a 2D fission RR error plot will be generated on this mesh.
+mesh = openmc.RegularMesh()
+mesh.dimension = [17,17]
+mesh.lower_left = [-14,-16.165]
+mesh.upper_right = [14,16.165]
+
 ############ Set the domain ###########
-# If domain_type = 'material', 
+# If domain_type = 'material',
 # assign the list of desired materials to domain (eg [fuel_mat, water_mat]);
-# if all materials are desired, use geom.get_all_materials().values
+# if all materials are desired, use geom.get_all_materials().values()
 
 # If domain_type = 'cell'
 # assign the list of desired materials to domain (eg [fuel_cell, water_cell]);
@@ -268,17 +277,6 @@ settings.export_to_xml()
 domain_type = 'material'
 domain = geom.get_all_materials().values()
 subdomain_to_plot = fuel_mat
-
-# ################# Mesh ################# 
-# Create a mesh over the geometry.
-# If domain = 'mesh' 
-# the mgxs will be generated on this mesh.
-# If quantify_error = True, 
-# a 2D fission RR error plot will be generated on this mesh.
-mesh = openmc.RegularMesh()
-mesh.dimension = [170,170]
-mesh.lower_left = [-14,-16.165]
-mesh.upper_right = [14,16.165]
 
 ######################
 #end example
