@@ -15,9 +15,9 @@ class Optimize:
 
 ####################################################################
 
-	def successive(self, MPI, mpicommand, numprocs, numthreads, machinefile, 
-		settings, SPCE, GroupStructures, mgxs_lib,
-		legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance):
+	def successive(self, n, MPI, mpicommand, numprocs, numthreads, machinefile,
+		settings, SPCE, GroupStructures, mgxs_lib, legendre, iso_mgxs_lib,
+		angle_mgxs_lib, tolerance):
 
 		print("This is the successive optimization option. An energy", \
 			"optimization takes place using L=0 to select the best group structure G.", \
@@ -25,32 +25,30 @@ class Optimize:
 			"Finally, another energy optimization takes place using L to select the best group structure.")
 		ranked_choices = []
 
-		BestGroups, BestBias = self.optimize_energy(MPI, mpicommand, numprocs, numthreads, machinefile,
-			settings, SPCE, GroupStructures, mgxs_lib, 
+		BestGroups, BestBias = self.optimize_energy(n, MPI, mpicommand, numprocs,
+			numthreads, machinefile, settings, SPCE, GroupStructures, mgxs_lib,
 			tolerance, legendre=0)
 
 		ranked_choices.append([BestGroups, 0])
 
 		if legendre > 0:
-			BestLegendre = self.optimize_scatter(MPI, mpicommand, numprocs, numthreads, machinefile,
-				settings, SPCE, legendre, mgxs_lib, 
-				iso_mgxs_lib, angle_mgxs_lib, tolerance, GroupStructures, num_groups=BestGroups)
+			BestLegendre = self.optimize_scatter(n, MPI, mpicommand, numprocs,
+				numthreads, machinefile, settings, SPCE, legendre, mgxs_lib,
+				iso_mgxs_lib, angle_mgxs_lib, tolerance, GroupStructures,
+				num_groups=BestGroups)
 
 			ranked_choices.append([BestGroups, BestLegendre])
 
-			BestGroups, BestBias = self.optimize_energy(MPI, mpicommand, numprocs, numthreads, machinefile,
-				settings, SPCE, GroupStructures, mgxs_lib, 
-				tolerance, legendre=BestLegendre)
+			BestGroups, BestBias = self.optimize_energy(n, MPI, mpicommand,
+				numprocs, numthreads, machinefile, settings, SPCE, GroupStructures,
+				mgxs_lib, tolerance, legendre=BestLegendre)
 
 			ranked_choices.append([BestGroups, BestLegendre])
 
 		else:
 			BestLegendre = 0
 
-		print("Best overall Legendre is:", BestLegendre, "for a group structure of:", BestGroups, "groups")
-
 		ranked_choices = ranked_choices[::-1]
-		print(ranked_choices)
 		self.G = BestGroups 
 		self.L = BestLegendre
 		self.B = BestBias
@@ -58,9 +56,9 @@ class Optimize:
 
 ####################################################################
 
-	def combinations(self, MPI, mpicommand, numprocs, numthreads, machinefile, 
-		settings, SPCE, GroupStructures, mgxs_lib,
-		legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance):
+	def combinations(self, n, MPI, mpicommand, numprocs, numthreads, machinefile,
+		settings, SPCE, GroupStructures, mgxs_lib, legendre, iso_mgxs_lib,
+		angle_mgxs_lib, tolerance):
 
 		print("This is the combinations optimization option.", \
 			"An energy optimization will take place for every Legendre expansion", \
@@ -76,9 +74,9 @@ class Optimize:
 		ranked_choices = []
 
 		for L in range(legendre+1):
-			TempGroups, TempBias = self.optimize_energy(MPI, mpicommand, numprocs, numthreads, machinefile, 
-				settings, SPCE, GroupStructures, mgxs_lib, 
-				tolerance, legendre=L)
+			TempGroups, TempBias = self.optimize_energy(n, MPI, mpicommand,
+				numprocs, numthreads, machinefile, settings, SPCE, GroupStructures,
+				mgxs_lib, tolerance, legendre=L)
 			Groups.append(TempGroups)
 			Bias.append(TempBias)
 			Costs.append(self.TempCost*(L+1))
@@ -88,11 +86,9 @@ class Optimize:
 		BestGroups = Groups[BestLegendre]
 		BestBias = Bias[BestLegendre]
 
-		print("Best overall Legendre is:", BestLegendre, "for a group structure of:", BestGroups, "groups")
-
 		temp_choices.sort(key=sort_by_bias)
 		for element in temp_choices:
-			ranked_choices.append(temp_choices[1::])
+			ranked_choices.append(element[1::])
 		self.G = BestGroups 
 		self.L = BestLegendre
 		self.B = BestBias
@@ -100,9 +96,8 @@ class Optimize:
 
 ####################################################################
 
-	def optimize_energy(self, MPI, mpicommand, numprocs, numthreads, machinefile, 
-		settings, SPCE, GroupStructures, mgxs_lib, 
-		tolerance, legendre=0):
+	def optimize_energy(self, n, MPI, mpicommand, numprocs, numthreads, machinefile,
+		settings, SPCE, GroupStructures, mgxs_lib, tolerance, legendre=0):
 
 		print("optimizing energy...")
 
@@ -119,7 +114,8 @@ class Optimize:
 		stdev = []
 		costs = []
 		for Ncoarse_grps in GroupStructures:
-			print("Running with", Ncoarse_grps, "energy groups and Legendre expansion of", legendre)
+			print("Running with", Ncoarse_grps, "energy groups and Legendre expansion of",
+				legendre)
 			new_structure = openmc.mgxs.EnergyGroups(GroupStructures[Ncoarse_grps])
 			new_mgxs_file, new_materials, new_geometry = mgxs_lib.get_condensed_library(
 				new_structure).create_mg_mode()
@@ -127,7 +123,8 @@ class Optimize:
 			new_materials.export_to_xml()
 			new_geometry.export_to_xml()
 			if MPI == True:
-				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+					'-machinefile',machinefile],threads=numthreads,cwd='.')
 			else:
 				openmc.run()
 
@@ -166,16 +163,16 @@ class Optimize:
 		plt.title("Multi-group bias in k-eff wrt CE mode (L=%i)" %(legendre))
 		plt.xlabel("Number of groups")
 		plt.ylabel("k-eff difference [pcm]")
-		plt.savefig("Group_bias"+str(legendre))
+		plt.savefig("Group_bias"+str(legendre)+"_state"+str(n))
 		plt.clf()
 
 		return groups[choice], biases[choice]
 
 ####################################################################
 
-	def optimize_scatter(self, MPI, mpicommand, numprocs, numthreads, machinefile, 
-		settings, SPCE, legendre, mgxs_lib, 
-		iso_mgxs_lib, angle_mgxs_lib, tolerance, GroupStructures, num_groups=0):
+	def optimize_scatter(self, n, MPI, mpicommand, numprocs, numthreads, machinefile,
+		settings, SPCE, legendre, mgxs_lib, iso_mgxs_lib, angle_mgxs_lib, tolerance,
+		GroupStructures, num_groups=0):
 
 		print("optimizing scatter representation...")
 
@@ -204,7 +201,8 @@ class Optimize:
 			settings.max_order = i 
 			settings.export_to_xml()
 			if MPI == True:
-				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+					'-machinefile',machinefile],threads=numthreads,cwd='.')
 			else:
 				openmc.run()
 
@@ -238,7 +236,8 @@ class Optimize:
 			iso_materials_file.export_to_xml()
 			iso_geometry_file.export_to_xml()
 			if MPI == True:
-				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+					'-machinefile',machinefile],threads=numthreads,cwd='.')
 			else:
 				openmc.run()
 
@@ -267,7 +266,8 @@ class Optimize:
 			angle_materials_file.export_to_xml()
 			angle_geometry_file.export_to_xml()
 			if MPI == True:
-				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+					'-machinefile',machinefile],threads=numthreads,cwd='.')
 			else:
 				openmc.run()
 
@@ -301,10 +301,7 @@ class Optimize:
 		plt.title("Multi-group bias in k-eff wrt CE mode (G=%i)" %(num_groups))
 		plt.xlabel("Legendre scattering order")
 		plt.ylabel("k-eff difference [pcm]")
-		plt.savefig("Scatter_bias"+str(num_groups))
+		plt.savefig("Scatter_bias"+str(num_groups)+"_state"+str(n))
 		plt.clf()
 
 		return choice
-
-####################################################################
-# end class 

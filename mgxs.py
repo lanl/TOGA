@@ -1,33 +1,35 @@
 import copy
+import os
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+
 import openmc
-import os
-from yakxs import *
 from optimize import *
+from yakxs import *
 
 class MGXS:
-
-####################################################################
 
 	def __init__(self):
 
 		self.choices = []
 		self.biases = []
 
-####################################################################
-
-	def compute_mgxs(self, n, libname, universe, settings, geometry, mesh, domain_type, domain, subdomain_to_plot,
-		mgxs_types, GroupStructures, num_groups=None, num_delayed_groups=6, optimize=False, opt_strategy='successive', opt_tolerance=1.0,
-		legendre=0, iso_hist=False, angle_hist=False, quantify_error=False, tabulation=None,
-		MPI=False, machinefile='', numprocs='', numthreads='', mpicommand='',
-		Description="", Generator='INL', TimeCreated='', mgxs_bynuclide=[], mgxs_tablewise =[], mgxs_librarywise =[]):
+	def compute_mgxs(self, n, libname, universe, settings, geometry, mesh,
+		domain_type, domain, subdomain_to_plot, mgxs_types, GroupStructures,
+		num_groups=None, num_delayed_groups=6, optimize=False,
+		opt_strategy='successive', opt_tolerance=1.0,
+		legendre=0, iso_hist=False, angle_hist=False, quantify_error=False,
+		tabulation=None, MPI=False, machinefile='', numprocs='', numthreads='',
+		mpicommand='', Description="", Generator='INL', TimeCreated='',
+		mgxs_bynuclide=[], mgxs_tablewise =[], mgxs_librarywise =[]):
 
 		print("computing mgxs...")
 		os.environ['OPENMC_MG_CROSS_SECTIONS'] = 'mgxs.h5'
 		if GroupStructures == {}:
-			print("ERROR: GroupStructures requires at least one entry. Define GroupStructures in main.py")
+			print("ERROR: GroupStructures requires at least one entry. \
+				Define GroupStructures in main.py")
 
 		if optimize == True:
 			num_groups = max(GroupStructures.keys())
@@ -50,10 +52,21 @@ class MGXS:
 			t2.filters.append(openmc.MeshFilter(mesh))
 			t2.scores = ['fission']
 			tallies_file.append(t2, True)
+			t3 = openmc.Tally(tally_id=300)
 
-		##########################################
+		for i, d in enumerate(domain):
+			t = openmc.Tally(tally_id=301+i, name=d.name)
+			t.filters.append(openmc.EnergyFilter(group_edges))
+			if domain_type == 'cell':
+				t.filters.append(openmc.CellFilter(d))
+			elif domain_type == 'material':
+				t.filters.append(openmc.MaterialFilter(d))
+			elif domain_type == 'mesh':
+				t.filters.append(openmc.MeshFilter(d))
+			t.scores = ['flux']
+			tallies_file.append(t, False)
+
 		# Base library
-		##########################################
 		mgxs_lib = openmc.mgxs.Library(geometry)
 		mgxs_lib.energy_groups = energy_groups
 		mgxs_lib.mgxs_types = mgxs_types
@@ -66,10 +79,8 @@ class MGXS:
 		mgxs_lib.build_library()
 		mgxs_lib.add_to_tallies_file(tallies_file, merge=True)
 		
-		if iso_hist == True:
-		##########################################
 		# Isotropic histogram library
-		##########################################
+		if iso_hist == True:
 			iso_mgxs_lib = openmc.mgxs.Library(geometry)
 			iso_mgxs_lib.energy_groups = energy_groups
 			iso_mgxs_lib.mgxs_types = mgxs_types
@@ -86,10 +97,8 @@ class MGXS:
 		else:
 			iso_mgxs_lib = None
 
-		if angle_hist == True:
-		##########################################
 		# Angle-dependent histogram library
-		##########################################
+		if angle_hist == True:
 			angle_mgxs_lib = openmc.mgxs.Library(geometry)
 			angle_mgxs_lib.energy_groups = energy_groups
 			angle_mgxs_lib.mgxs_types = mgxs_types
@@ -109,13 +118,14 @@ class MGXS:
 
 		tallies_file.export_to_xml()
 		if MPI == True:
-			openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+			openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+				'-machinefile',machinefile],threads=numthreads,cwd='.')
 		else:
 			openmc.run()
 
-		ce_spfile = './statepoint_ce.h5'
+		ce_spfile = './'+str(n)+'statepoint_ce.h5'
 		os.rename('statepoint.'+str(settings.batches)+'.h5',ce_spfile)
-		ce_sumfile = './summary_ce.h5'
+		ce_sumfile = './'+str(n)+'summary_ce.h5'
 		os.rename('summary.h5',ce_sumfile)
 		SPCE = openmc.StatePoint(ce_spfile, autolink=False)
 		su = openmc.Summary(ce_sumfile)
@@ -123,26 +133,23 @@ class MGXS:
 		print("loading data...")
 		mgxs_lib.load_from_statepoint(SPCE)
 
+		# Optimization step
 		OPT = Optimize(num_groups, legendre)
 		if optimize == True:
-		##########################################
-		# Optimization step
-		##########################################
 			tolerance = 1.0+opt_tolerance/100.0
 			if opt_strategy == 'successive':
-				self.choices.append(OPT.successive(MPI, mpicommand, numprocs, numthreads, machinefile, 
-					settings, SPCE, GroupStructures, mgxs_lib, legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance))
+				self.choices.append(OPT.successive(n, MPI, mpicommand, numprocs,
+					numthreads, machinefile, settings, SPCE, GroupStructures, mgxs_lib,
+					legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance))
 			elif opt_strategy == 'combinations':
-				self.choices.append(OPT.combinations(MPI, mpicommand, numprocs, numthreads, machinefile, 
-					settings, SPCE, GroupStructures, mgxs_lib, legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance))
+				self.choices.append(OPT.combinations(n, MPI, mpicommand, numprocs,
+					numthreads, machinefile, settings, SPCE, GroupStructures, mgxs_lib,
+					legendre, iso_mgxs_lib, angle_mgxs_lib, tolerance))
 			else:
 				print("Please set opt_strategy to either 'successive' or 'combinations'.")
-		#end optimization
 
-		if quantify_error == True:
-		##########################################
 		# Error Quantification step
-		##########################################
+		if quantify_error == True:
 			k_ce = SPCE.k_combined
 			mgxs_file, new_materials, new_geometry = mgxs_lib.create_mg_mode()
 			mgxs_file.export_to_hdf5()
@@ -157,7 +164,8 @@ class MGXS:
 			tallies_file.export_to_xml()
 			print("running in multi-group mode")
 			if MPI == True:
-				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,'-machinefile',machinefile],threads=numthreads,cwd='.')
+				openmc.run(mpi_args=[mpicommand,'--bind-to','socket','-np',numprocs,
+					'-machinefile',machinefile],threads=numthreads,cwd='.')
 			else:
 				openmc.run()
 
@@ -175,7 +183,7 @@ class MGXS:
 			print('Multi-Group keff = {0:1.6f}'.format(k_mg))
 			print('bias [pcm]: {0:1.1f}'.format(bias.nominal_value))
 
-		######## Plotting cross sections ########
+		    # Plotting cross sections
 			print("plotting mgxs...")
 
 			flux_ce = SPCE.get_tally(id=100)
@@ -191,16 +199,25 @@ class MGXS:
 
 			if domain_type == 'mesh':
 				print("Cannot plot CE/MG cross sections for a material when \
-					Mesh domain is used, since a mesh does not know what material is in each cell")
+					Mesh domain is used, since a mesh does not know what material is in \
+					each cell")
 			else: 
 				for i, domains in enumerate(mgxs_lib.domains):
 					if mgxs_lib.domains[i].name == subdomain_to_plot.name:
 						dom = mgxs_lib.domains[i]
 						position = i
 				if domain_type == 'material':
-					fig = openmc.plot_xs(dom, ['total'], temperature=subdomain_to_plot.temperature)
+					if subdomain_to_plot.temperature == None:
+						fig = openmc.plot_xs(dom, ['total'])
+					else:
+						fig = openmc.plot_xs(dom, ['total'],
+							temperature=subdomain_to_plot.temperature)
 				elif domain_type == 'cell':
-					fig = openmc.plot_xs(dom.fill, ['total'], temperature=subdomain_to_plot.temperature)
+					if subdomain_to_plot.temperature == None:
+						fig = openmc.plot_xs(dom.fill, ['total'])
+					else:
+						fig = openmc.plot_xs(dom.fill, ['total'],
+							temperature=subdomain_to_plot.temperature)
 				openmc.plot_xs(new_materials[position], ['total'], plot_CE=False, 
 					mg_cross_sections='mgxs.h5', axis=fig.axes[0])
 				fig.axes[0].legend(loc=2, prop={'size': 6}).set_visible(True)
@@ -215,7 +232,7 @@ class MGXS:
 				plt.tight_layout()
 				plt.close()
 
-			# ######## Plotting 2D reaction rates ########
+			# Plotting 2D reaction rates
 			if len(mesh.dimension) != 2:
 				print("2D error plot can only be produced if 2D mesh is used")
 			else:
@@ -233,7 +250,8 @@ class MGXS:
 				ce_fission_rates[ce_fission_rates == 0.] = np.nan
 				ratios = []
 				for i in range(len(ce_fission_rates)):
-					ratios.append(np.divide(mg_fission_rates[i]-ce_fission_rates[i], ce_fission_rates[i])[:]*100)
+					ratios.append(np.divide(mg_fission_rates[i]-ce_fission_rates[i],
+						ce_fission_rates[i])[:]*100)
 
 				norm = mpl.colors.Normalize(vmin=0, vmax=20.0)
 				plt.imshow(ratios, interpolation='none', cmap='jet', norm=norm, origin='lower')
@@ -241,7 +259,21 @@ class MGXS:
 				plt.colorbar()
 				plt.savefig('FissionRates'+str(n))
 
-		return mgxs_lib
+			# Printing mgxs, flux, std_dev to text
+			if domain_type != 'mesh':
+				print("outputing error data to text...")
 
-####################################################################
-#end class
+				total_mgxs = mgxs_lib.get_mgxs(subdomain_to_plot, 'total').get_xs(value='mean')
+				std_dev_mgxs = mgxs_lib.get_mgxs(subdomain_to_plot, 'total').get_xs(value='std_dev')
+				np.savetxt("mgxs_error"+str(n)+".txt", np.c_[total_mgxs, std_dev_mgxs],
+					header='Total MGXS for subdomain        std_dev')
+
+				flux = []
+				flux_std_dev = []
+				for i in range(num_groups):
+					flux.append(flux_ce.mean[i][0][0])
+					flux_std_dev.append(flux_ce.std_dev[i][0][0])
+					np.savetxt("flux_error"+str(n)+".txt", np.c_[flux, flux_std_dev],
+						header='Flux for subdomain         std_dev')
+
+		return mgxs_lib

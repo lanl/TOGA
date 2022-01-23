@@ -1,34 +1,41 @@
 from collections import OrderedDict
-from getfilename import *
 import h5py
 from itertools import product
 import numpy as np
+from xml.etree import ElementTree as ET
+
 import openmc
 from openmc._xml import clean_indentation
-from xml.etree import ElementTree as ET
+from getfilename import *
 
 class YAKXS:
 
-####################################################################
+	def __init__(self, LibraryName, NGroup, equivalence):
 
-	def __init__(self, LibraryName, NGroup):
-
-		self.root = ET.Element("Multigroup_Cross_Section_Libraries")
+		self.yakxs = ET.Element("YakXs")
+		self.root = ET.SubElement(self.yakxs, "Multigroup_Cross_Section_Libraries")
 		self.root.set("Name", LibraryName)
 		self.root.set("NGroup", NGroup)
+		if equivalence:
+			self.equivalence = ET.SubElement(self.yakxs, "Equivalence_Data_Library")
+			self.equivalence.set("Name", LibraryName)
+			self.equivalence.set("NGroup", NGroup)
 
-####################################################################
-
-	def export_to_xml(self, NGroups, num_delayed_groups, mgxs_types, legendre_order, 
-		mgxs_file_name, mgxs_libs, tabulation,
-		Description="", Generator="", TimeCreated="",
-		mgxs_bynuclide=[], mgxs_tablewise =[], mgxs_librarywise =[]):
+	def export_to_xml(self, NGroups, num_delayed_groups, mgxs_types, legendre_order,
+		equivalence, mgxs_libs, tabulation, Description="", Generator="",
+		TimeCreated="", mgxs_bynuclide=[], mgxs_tablewise =[], mgxs_librarywise =[]):
 
 		hf = h5py.File('0_mgxs.h5', 'r')
 		ID = 0
 
 		fn = FileName()
 		fn.get_filename(ending="_mgxs.h5")
+
+		if equivalence:
+			fn2 = FileName()
+			fn3 = FileName()
+			fn2.get_filename(ending="statepoint_ce.h5")
+			fn3.get_filename(ending="summary_ce.h5")
 
 		for name in list(hf):
 			ID += 1
@@ -47,6 +54,10 @@ class YAKXS:
 			library.set("Generator", Generator)
 			library.set("TimeCreated", TimeCreated)
 
+			if equivalence:
+				equivalence_data = ET.SubElement(self.equivalence, "EquivalenceData")
+				equivalence_data.set("ID", str(ID))
+
 			################# Tabulation elements ################
 			GridCoordNames = ET.SubElement(library, "Tabulation")
 			ReferenceGridIndex = ET.SubElement(library, "ReferenceGridIndex")
@@ -54,12 +65,18 @@ class YAKXS:
 			ReferenceGridIndex.text = ""
 			IndexDict = OrderedDict()
 
+			if equivalence:
+				GridCoordNames2 = ET.SubElement(equivalence_data, "Tabulation")
+				ReferenceGridIndex2 = ET.SubElement(equivalence_data, "ReferenceGridIndex")
+
 			for key in tabulation:
 				IndexDict[key] = {}
 				ReferenceGridIndex.text = \
 				ReferenceGridIndex.text+str(len(tabulation[key]))+" "
 				GridCoordNames.text = GridCoordNames.text+key+" "
 				variable = ET.SubElement(library, key)
+				if equivalence:
+					variable2 = ET.SubElement(equivalence_data, key)
 				values = ""
 				countvalue = 0
 				for value in tabulation[key]:
@@ -67,8 +84,13 @@ class YAKXS:
 					IndexDict[key].update({value: countvalue})
 					values = values+str(value)+" "
 				variable.text = values[:-1]
+				if equivalence:
+					variable2.text = values[:-1]
 			ReferenceGridIndex.text = ReferenceGridIndex.text[:-1]
 			GridCoordNames.text = GridCoordNames.text[:-1]
+			if equivalence:
+				GridCoordNames2.text = GridCoordNames.text
+				ReferenceGridIndex2.text = ReferenceGridIndex.text
 
 			AllReactions = ET.SubElement(library, "AllReactions")
 			AllReactions.text = self.ReactionTypes(reactions)
@@ -81,10 +103,29 @@ class YAKXS:
 
 				Table = ET.SubElement(library, "Table")
 				Table.set("gridIndex", str(i+1))
+				if equivalence:
+					Table2 = ET.SubElement(equivalence_data, "Table")
+					Table2.set("gridIndex", str(i+1))
+					Flux = ET.SubElement(Table2, "Flux")
+					Flux.text = ""
+
+					SPCE = openmc.StatePoint(fn2.listfn[i])
+					if mgxs_libs[i].domain_type == 'mesh':
+						t = SPCE.get_tally(id=301)
+						for E in range(NGroups):
+							result = t.mean[ID-1 + E*len(list(hf))]
+							Flux.text = Flux.text+str(result[0][0])+" "
+					else:
+						t = SPCE.get_tally(name=name)
+						for result in t.mean:
+							Flux.text = Flux.text+str(result[0][0])+" "
+					Flux.text = Flux.text[:-1]
+
 				Isotope = ET.SubElement(Table, "Isotope")
 				Isotope.set("Name", "pseudo")
 				Isotope.set("L", str(legendre_order))
 				Isotope.set("I", str(num_delayed_groups))
+
 				Tablewise = ET.SubElement(Table, "Tablewise")
 				Tablewise.set("L", str(legendre_order))
 				Tablewise.set("I", str(num_delayed_groups))
@@ -99,9 +140,13 @@ class YAKXS:
 							Reaction = ET.SubElement(Tablewise, 'Transport')
 						Reaction.set("index", 'g')
 						Reaction.text = ""
-						for j, domain in enumerate(mgxs_libs[i].domains):
-							if j == ID-1:
-								data = mgxs_libs[i].get_mgxs(domain, rxn).get_xs()
+						if mgxs_libs[i].domain_type == 'mesh':
+							data = mgxs_libs[i].get_mgxs(mgxs_libs[i].domains[0], rxn
+								).get_xs()[ID-1]
+						else:
+							for j, domain in enumerate(mgxs_libs[i].domains):
+								if j == ID-1:
+									data = mgxs_libs[i].get_mgxs(domain, rxn).get_xs()
 						for d in data:
 							Reaction.text = Reaction.text+str(d)+" "
 						Reaction.text = Reaction.text[:-1]
@@ -126,12 +171,14 @@ class YAKXS:
 
 							for j in range(legendre_order+1):
 								for k in range(len(g_min)):
-									Profile.text = Profile.text+str(g_min[i])+" "+str(g_max[k])+"\n"
+									Profile.text = Profile.text+str(
+										g_min[i])+" "+str(g_max[k])+"\n"
 							for j in range(legendre_order+1):
 								count = 0
 								for g_in in range(NGroups):
 									for g_out in range(g_min[g_in]-1,g_max[g_in]):
-										Value.text = Value.text+str(data[j+(legendre_order+1)*count])+" "
+										Value.text = Value.text+str(data[j+(
+											legendre_order+1)*count])+" "
 										count = count+1
 									Value.text = Value.text+"\n"
 
@@ -144,8 +191,6 @@ class YAKXS:
 								elif rxn == 'chi-delayed' or rxn  == 'beta':
 									for g in d:
 										Reaction.text = Reaction.text+str(g)+" "
-								elif rxn == 'decay-rate':
-									Reaction.text = Reaction.text+str(d)+" "
 								else:
 									Reaction.text = Reaction.text+str(d)+" "
 						Reaction.text = Reaction.text[:-1]
@@ -154,11 +199,9 @@ class YAKXS:
 			Librarywise.set("L", str(legendre_order))
 			Librarywise.set("I", str(num_delayed_groups))
 
-			clean_indentation(self.root)
-			tree = ET.ElementTree(self.root)
+			clean_indentation(self.yakxs)
+			tree = ET.ElementTree(self.yakxs)
 			tree.write('./mgxs.xml', xml_declaration=True, encoding='utf-8')
-
-####################################################################
 
 	def ReactionTypes(self, mgxs_types):
 
@@ -201,6 +244,3 @@ class YAKXS:
 		text = text[:-1]
 
 		return text
-
-####################################################################
-#end class
